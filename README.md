@@ -2,7 +2,7 @@
 
 **Maqta Engine** (from Arabic *maqta'* / مقطع, meaning "segment" or "syllable") is a zero-dependency TypeScript module for analyzing fully vocalized Arabic words.
 
-It is the core logic powering **IqraSpeed's drill generation system**.
+It is the core logic powering **Haroofie's drill generation system**.
 
 The engine takes an Arabic word, decomposes it into phonetic clusters, identifies its grammatical and phonetic features (Madd, Sukoon, Shadda, etc.), assigns learning categories and levels, and generates a deterministic audio ID that matches the `audio-manifest.json` naming convention.
 
@@ -306,11 +306,231 @@ Maqta Engine follows a few core principles:
 - **Framework Independent:** No UI, React, or application-specific dependencies.
 - **Corpus Independent:** Analyzes words without requiring access to the Quran corpus or a database.
 - **Audio Compatible:** Generated IDs follow the established audio naming convention.
-- **Modular:** Designed to work independently while integrating with IqraSpeed's drill generation pipeline.
+- **Modular:** Designed to work independently while integrating with Haroofie's drill generation pipeline.
 
 The engine handles the phonetic classification of individual words. Higher-level systems, such as the Pack Builder and the future Wasla Engine, are responsible for corpus management, drill organization, and cross-word analysis.
 
 ---
 
 **Maqta Engine**  
-*The phonetic classification core of IqraSpeed.*
+*The phonetic classification core of Haroofie.*
+
+---
+---
+---
+
+
+# Maqta Engine (Python)
+
+The **Maqta Engine Python module** is a standalone, zero-dependency implementation of the Maqta phonetic classification system.
+
+You can drop `maqta.py` directly into a Google Colab environment or any Python repository and import it using:
+
+```python
+import maqta
+```
+
+The module relies exclusively on standard Python 3 libraries, such as `re` and `dataclasses`. No external packages or installations are required.
+
+It provides two primary functions:
+
+- `classify()` — Analyzes an individual Arabic word.
+- `classify_batch()` — Processes large collections of Arabic words and organizes the results for downstream use.
+
+---
+
+## 1. Single Word Classification
+
+### `classify(word)`
+
+Use `classify()` when you want to analyze an individual Arabic word and inspect its phonetic features, classification, learning level, and audio requirements.
+
+The function returns a `Classification` dataclass containing the following fields:
+
+| Field | Type | Description |
+|---|---|---|
+| `word` | `str` | The original Arabic word. |
+| `base_letters` | `int` | Number of actual Arabic letters, excluding diacritics. |
+| `clusters` | `list[Cluster]` | Letter-by-letter breakdown, with attached diacritical marks. |
+| `features` | `Features` | Boolean flags and counts describing phonetic rules. |
+| `primary_category` | `str \| None` | Primary category assigned to the word (A–K). |
+| `also_fits` | `list[str]` | Additional categories the word qualifies for. |
+| `level` | `str \| None` | Assigned complexity level (L1–L4). |
+| `unit_count` | `float` | Calculated phonetic weight used for level assignment. |
+| `drillable` | `bool` | Whether the word passes the standalone drill filters. |
+| `drill_filter_reason` | `str \| None` | Explanation of why a word failed the drillability checks. |
+| `audio_id` | `str \| None` | Exact underscore-separated identifier required for the audio filename. |
+
+### Usage Example
+
+```python
+import maqta
+
+result = maqta.classify('مِنْ')
+
+print("Audio ID:", result.audio_id)
+# Output: 24_02_25_07
+
+print("Primary Category:", result.primary_category)
+# Output: F
+
+print("Also fits:", result.also_fits)
+# Output: ['D']
+
+print("Level:", result.level)
+# Output: L2
+
+print("Drillable:", result.drillable)
+# Output: True
+```
+
+### Inspecting Phonetic Features
+
+The returned `features` object provides access to the detected phonetic properties of the word.
+
+```python
+print("Has sukoon?", result.features.sukoon)
+# Output: True
+
+print("Is noon sakinah?", result.features.noon_sakinah)
+# Output: True
+```
+
+Features can be inspected individually without having to process the Arabic word again.
+
+### Handling Non-Drillable Words
+
+The engine also identifies words that fail the standalone drillability rules.
+
+For example, a word beginning with a Shadda-bearing letter is not considered drillable.
+
+```python
+bad_word = maqta.classify('بَّتْ')
+
+print("Drillable:", bad_word.drillable)
+# Output: False
+
+print("Reason:", bad_word.drill_filter_reason)
+# Output: shadda at position 0
+```
+
+The `drill_filter_reason` field explains why the word was rejected, making it easier for downstream systems to handle invalid entries.
+
+---
+
+## 2. Batch Processing
+
+### `classify_batch(words)`
+
+Use `classify_batch()` when processing large collections of Arabic words, such as an entire Quran wordlist.
+
+The function runs `classify()` on every input word and automatically organizes the results for consumption by the Pack Builder.
+
+Non-drillable words are excluded from the category and level groupings, but their classification results are retained in the complete output.
+
+### Return Structure
+
+The function returns a dictionary containing four keys:
+
+| Key | Description |
+|---|---|
+| `all` | A list of every `Classification` object, including non-drillable words. |
+| `by_category` | Groups drillable words by their primary category (A–K). |
+| `by_level` | Groups drillable words by their assigned complexity level (L1–L4). |
+| `audio_ids` | A deduplicated collection of unique audio IDs generated by drillable words. |
+
+### Usage Example
+
+```python
+import maqta
+
+words = ['بَ', 'مِنْ', 'يَقُولُ', 'بَّتْ']
+
+results = maqta.classify_batch(words)
+```
+
+### Accessing Category Groups
+
+Retrieve all drillable words assigned to a particular category.
+
+```python
+# Get all words in Category C (Madd)
+category_c_words = results['by_category'].get('C', [])
+
+print("Category C count:", len(category_c_words))
+```
+
+### Accessing Audio IDs
+
+The `audio_ids` collection contains the unique audio identifiers required for the processed wordlist.
+
+```python
+print("Unique audio files needed:", results['audio_ids'])
+```
+
+These IDs can be passed to the audio generation pipeline to determine which audio assets need to be generated.
+
+### Accessing Original Words
+
+Each entry in the category and level groupings is a `Classification` object, not just a string.
+
+You can access the original Arabic word and all its classification data directly.
+
+```python
+category_c_words = results['by_category'].get('C', [])
+
+if category_c_words:
+    print("Example word from Cat C:", category_c_words[0].word)
+
+# Output: يَقُولُ
+```
+
+---
+
+## 3. Arabic Alphabet & Audio Mapping
+
+The engine maps the Arabic alphabet to the standardized letter and diacritic codes defined in `audio-manifest.json`.
+
+### Supported Letter Variants
+
+In addition to standard Arabic letters, the engine handles common Unicode variants, including:
+
+- `آ` — Alif Maddah
+- `أ` — Alif with Hamza Above
+- `ة` — Ta Marbuta
+- `ى` — Alif Maqsura
+
+The module normalizes these characters into their corresponding standardized letter codes.
+
+### Audio Code Compatibility
+
+The engine uses:
+
+- **Letter codes:** `01–29`
+- **Mark codes:** `00–14`
+
+Every generated `audio_id` follows the established underscore-separated naming convention.
+
+This ensures compatibility with the audio assets and ElevenLabs audio generation workflow.
+
+When processing text from the Quran corpus through `classify_batch()`, the engine handles the supported character normalization automatically, producing IDs that match the expected audio naming convention.
+
+---
+
+## 4. Design Philosophy
+
+The Python implementation follows the same core principles as the original Maqta Engine:
+
+- **Standalone:** Can be dropped into any compatible Python environment.
+- **Zero Dependencies:** Uses only Python's standard library.
+- **Portable:** Works in Google Colab and standard Python repositories.
+- **Deterministic:** Produces consistent classifications and audio IDs for identical inputs.
+- **Batch-Friendly:** Processes large word collections and organizes results for downstream systems.
+- **Audio Compatible:** Follows the standardized `audio-manifest.json` naming convention.
+
+The module is designed to handle phonetic classification independently, leaving corpus management, drill organization, and audio generation to the systems that consume its output.
+
+---
+
+**Maqta Engine (Python)**  
+*Standalone Arabic phonetic classification for Haroofie.*
